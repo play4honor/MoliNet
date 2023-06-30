@@ -110,9 +110,12 @@ class Waino(pl.LightningModule):
 
         self.metrics = nn.ParameterDict(
             {
-                "Accuracy": torchmetrics.classification.MulticlassAccuracy(
+                "train_accuracy": torchmetrics.classification.MulticlassAccuracy(
                     n_tokens, average="weighted"
-                )
+                ),
+                "validation_accuracy": torchmetrics.classification.MulticlassAccuracy(
+                    n_tokens, average="weighted"
+                ),
             }
         )
 
@@ -125,7 +128,7 @@ class Waino(pl.LightningModule):
 
         return self.net(x, pad_map)
 
-    def training_step(self, batch, batch_idx):
+    def step(self, batch, batch_idx):
         x, pad_mask, pretrain_mask = batch
 
         if self.mask_tokens:
@@ -145,14 +148,34 @@ class Waino(pl.LightningModule):
         # Get per-masked-token loss
         loss = (loss * loss_mask.reshape(-1)).sum() / (loss_mask.sum())
 
-        self.log("train_loss", loss)
         masked_x = x[loss_mask].reshape(-1)
         masked_y_hat = y_hat[loss_mask].reshape(-1, y_hat.shape[-1])
 
+        return masked_x, masked_y_hat, loss
+
+    def training_step(self, batch, batch_idx):
+        masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
+
+        self.log("train_loss", loss)
         self.log_dict(
             {
                 name: metric(masked_y_hat, masked_x)
                 for name, metric in self.metrics.items()
+                if "train" in name
+            }
+        )
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
+
+        self.log("validation_loss", loss)
+        self.log_dict(
+            {
+                name: metric(masked_y_hat, masked_x)
+                for name, metric in self.metrics.items()
+                if "validation" in name
             }
         )
 

@@ -1,7 +1,7 @@
 import pandas as pd
 import yaml
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 import torch
 
 from lightning.pytorch import Trainer
@@ -9,6 +9,7 @@ from lightning.pytorch import Trainer
 from src.data import PitchSequenceDataset
 from src.net import Waino
 
+import random
 
 # Setup config ------------------
 
@@ -30,9 +31,27 @@ ds = PitchSequenceDataset(
     p_mask=config["training_params"]["p_mask"],
     mask_tokens=config["training_params"]["mask_tokens"],
 )
-dl = DataLoader(ds, batch_size=config["training_params"]["batch_size"], shuffle=True)
 
-print(f"Loaded {len(ds)} sequences as {len(dl)} batches")
+n_val = int(len(ds) * config["training_params"]["holdout_prob"])
+permuted_idx = list(range(len(ds)))
+random.shuffle(permuted_idx)
+train_idx = permuted_idx[n_val:]
+validation_idx = permuted_idx[:n_val]
+
+train_ds = Subset(ds, train_idx)
+validation_ds = Subset(ds, validation_idx)
+
+
+train_dl = DataLoader(
+    train_ds, batch_size=config["training_params"]["batch_size"], shuffle=True
+)
+validation_dl = DataLoader(
+    validation_ds, batch_size=config["training_params"]["batch_size"], shuffle=True
+)
+
+print(
+    f"Loaded {len(ds)} sequences as {len(train_dl)} training batches and {len(validation_dl)} validation batches."
+)
 
 # Setup network -----------------
 
@@ -55,4 +74,4 @@ if __name__ == "__main__":
         precision="16-mixed",
     )
 
-    trainer.fit(net, train_dataloaders=dl)
+    trainer.fit(net, train_dataloaders=train_dl, val_dataloaders=validation_dl)

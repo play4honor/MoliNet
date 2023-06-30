@@ -9,7 +9,8 @@ training_params:
   accumulate_grad_batches: 4
   p_mask: 0.2
   min_length: 0
-  mask_tokens: False
+  mask_tokens: True
+  holdout_prob: .1
 
 net_params:
   d_model: 128
