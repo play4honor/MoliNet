@@ -29,10 +29,10 @@ class PitchSequenceDataset(Dataset):
             )  # to get per pitcher-game
             .agg({"pitch_type": list})
             .reset_index()
-            .sort_values("at_bat_number")
-            .groupby(["pitcher", "game_pk"])
-            .apply(self._make_pitch_sequence)
-            .reset_index()
+        )
+
+        self.pitcher_games["pitch_sequence"] = self.pitcher_games.apply(
+            self._make_pitch_sequence, axis=1
         )
 
         # Remove very short appearances, because it seems like they can cause
@@ -54,22 +54,10 @@ class PitchSequenceDataset(Dataset):
             lambda x: [self.vocab[z] for z in x]
         )
 
-    def _make_pitch_sequence(self, df):
+    def _make_pitch_sequence(self, row):
         """This is pretty slow."""
 
-        out_sequence = []
-
-        for row in df.itertuples():
-            out_sequence += ["<SEP>"]
-            out_sequence += [f"B_{row.batter}"]
-            out_sequence += row.pitch_type
-            pitcher = (
-                row.pitcher
-            )  # This is duplicative, because we only need it once, but.
-
-        out_sequence = [f"P_{pitcher}"] + out_sequence
-
-        return pd.DataFrame({"pitch_sequence": [out_sequence]})
+        return [f"P_{row.pitcher}"] + [f"B_{row.batter}"] + row.pitch_type
 
     def _make_vocab(self, df, mask_tokens):
         pdf = df.fillna({"pitch_type": "MISSING"})
