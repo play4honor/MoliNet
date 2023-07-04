@@ -88,6 +88,7 @@ class Waino(pl.LightningModule):
         mask_tokens,
     ):
         super().__init__()
+        self.save_hyperparameters()
 
         self.net = WainoNet(
             n_tokens,
