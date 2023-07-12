@@ -31,6 +31,7 @@ ds = PitchSequenceDataset(
     p_mask=config["training_params"]["p_mask"],
     mask_tokens=config["training_params"]["mask_tokens"],
 )
+ds.save_vocab("./reference/vocab.yaml")
 
 n_val = int(len(ds) * config["training_params"]["holdout_prob"])
 permuted_idx = list(range(len(ds)))
@@ -40,7 +41,6 @@ validation_idx = permuted_idx[:n_val]
 
 train_ds = Subset(ds, train_idx)
 validation_ds = Subset(ds, validation_idx)
-
 
 train_dl = DataLoader(
     train_ds, batch_size=config["training_params"]["batch_size"], shuffle=True
