@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -7,16 +8,61 @@ from torch.utils.data import Dataset
 import yaml
 
 
+class Normalizer:
+    def __init__(self, mean, std):
+        if isinstance(mean, (np.ndarray, torch.Tensor)):
+            self.mean = mean.item()
+            self.std = std.item()
+
+        else:
+            self.mean = mean
+            self.std = std
+
+    def normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def denormalize(self, x):
+        # reverse operation
+        return x * self.std + self.mean
+
+    def __call__(self, x):
+        return self.normalize(x)
+
+    @classmethod
+    def from_data(cls, x):
+        mean = x.mean()
+        std = x.std()
+
+        return cls(mean, std)
+
+    def to_dict(self):
+        return {
+            "class": "Normalizer",
+            "mean": self.mean,
+            "std": self.std,
+        }
+
+    def __repr__(self):
+        return f"Normalizer(mean={self.mean}, std={self.std})"
+
+
 class PitchSequenceDataset(Dataset):
+    FEATURE_TYPING = {
+        "release_speed": Normalizer,
+    }
+
     def __init__(
         self,
         pitch_df,
         vocab=None,
         p_mask: float = 0.2,
         max_length: int = 64,
-        min_length: int = 0,
         mask_tokens: bool = False,
     ):
+        self.morphers = {
+            feature: morpher.from_data(pitch_df[feature])
+            for feature, morpher in self.FEATURE_TYPING.items()
+        }
         self.pitcher_games = (
             pitch_df.fillna(
                 {
@@ -25,9 +71,14 @@ class PitchSequenceDataset(Dataset):
             )
             .sort_values(["pitch_number"])  # This order's each team's pitches in a game
             .groupby(["pitcher", "batter", "game_pk", "at_bat_number"])  # to get per PA
-            .agg({"pitch_type": list})
+            .agg({"pitch_type": list} | {f: list for f in self.FEATURE_TYPING.keys()})
             .reset_index()
             .sort_values(["at_bat_number"])
+        )
+
+        pfeat_cols = list(self.FEATURE_TYPING.keys())
+        self.pitcher_games[pfeat_cols] = self.pitcher_games[pfeat_cols].applymap(
+            np.array
         )
 
         self.pitcher_games["n_batters_faced"] = self.pitcher_games.groupby(
@@ -54,8 +105,6 @@ class PitchSequenceDataset(Dataset):
         )
 
     def _make_pitch_sequence(self, row):
-        """This is pretty slow."""
-
         return (
             [f"BF_{row.n_batters_faced}"]
             + [f"P_{row.pitcher}"]
@@ -96,9 +145,12 @@ class PitchSequenceDataset(Dataset):
 
         return vocab
 
-    def save_vocab(self, path):
-        with open(path, "w") as f:
+    def save_state(self, path):
+        with open(f"{path}/vocab.yaml", "w") as f:
             yaml.dump(self.vocab, f)
+
+        with open(f"{path}/morphers.yaml", "w") as f:
+            yaml.dump({feat: m.to_dict() for feat, m in self.morphers.items()}, f)
 
     def __getitem__(self, idx):
         x = torch.tensor(self.pitcher_games.iloc[idx].pitch_sequence, dtype=torch.long)
@@ -110,6 +162,16 @@ class PitchSequenceDataset(Dataset):
         right_pad_length = self.max_length - x_length
 
         x = F.pad(x, (0, right_pad_length), value=0)
+
+        # Transform and pad the pitch features.
+        pitch_features = {
+            feature: torch.tensor(morpher(self.pitcher_games[feature].iloc[idx]))
+            for feature, morpher in self.morphers.items()
+        }
+        pitch_features = {
+            feature: F.pad(x, (0, right_pad_length), value=0)
+            for feature, x in pitch_features.items()
+        }
 
         # Create a mask that indicates the padding positions.
         padding_mask = torch.zeros([self.max_length], dtype=torch.bool)
@@ -123,10 +185,31 @@ class PitchSequenceDataset(Dataset):
             pretrain_mask = torch.rand_like(x, dtype=torch.float) < self.p_mask
             remake_mask = pretrain_mask[:x_length].all()
 
-        return x, padding_mask, pretrain_mask
+        return x, pitch_features, padding_mask, pretrain_mask
 
     def __len__(self):
         return len(self.pitcher_games)
 
     def get_vocab(self):
         return self.vocab
+
+
+if __name__ == "__main__":
+    # This is relative to the root directory, not waino/
+    with open("./waino/waino_config.yaml", "r") as f:
+        config = yaml.load(f, yaml.CLoader)
+
+    pitch_df = pd.read_parquet("./data/test_data.parquet")
+
+    ds = PitchSequenceDataset(
+        pitch_df,
+        max_length=config["net_params"]["max_length"],
+        p_mask=config["training_params"]["p_mask"],
+        mask_tokens=config["training_params"]["mask_tokens"],
+    )
+
+    print(ds.morphers["release_speed"])
+
+    print(ds.pitcher_games.iloc[0])
+
+    print(ds[0])
