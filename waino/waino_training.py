@@ -24,14 +24,18 @@ print(f"Loading and transforming data from {config['data']}")
 
 pitch_df = pd.read_parquet(config["data"])
 
+missing_games = pitch_df.game_pk[pitch_df.pitch_type.isna()].value_counts()
+missing_games = missing_games[missing_games > 30]
+pitch_df = pitch_df.loc[~pitch_df.game_pk.isin(missing_games.index)]
+
 ds = PitchSequenceDataset(
     pitch_df,
-    min_length=config["training_params"]["min_length"],
+    feature_config=config["features"],
     max_length=config["net_params"]["max_length"],
     p_mask=config["training_params"]["p_mask"],
     mask_tokens=config["training_params"]["mask_tokens"],
 )
-ds.save_vocab("./reference/vocab.yaml")
+ds.save_state("./reference")
 
 n_val = int(len(ds) * config["training_params"]["holdout_prob"])
 permuted_idx = list(range(len(ds)))
@@ -60,6 +64,7 @@ net = Waino(
     n_tokens=len(ds.get_vocab()),
     optim_lr=config["training_params"]["learning_rate"],
     mask_tokens=config["training_params"]["mask_tokens"],
+    morphers=train_ds.dataset.morphers,
 )
 
 print(f"Created model with {sum(p.numel() for p in net.parameters())} weights.")

@@ -8,8 +8,19 @@ from torch.utils.data import Dataset
 import yaml
 
 
+class Unsqueezer(torch.nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        return x.unsqueeze(self.dim)
+
+
 class Normalizer:
     def __init__(self, mean, std):
+        self.required_dtype = torch.float32
+
         if isinstance(mean, (np.ndarray, torch.Tensor)):
             self.mean = mean.item()
             self.std = std.item()
@@ -19,7 +30,8 @@ class Normalizer:
             self.std = std
 
     def normalize(self, x):
-        return (x - self.mean) / self.std
+        x = (x - self.mean) / self.std
+        return np.nan_to_num(x, self.mean)
 
     def denormalize(self, x):
         # reverse operation
@@ -45,23 +57,35 @@ class Normalizer:
     def __repr__(self):
         return f"Normalizer(mean={self.mean}, std={self.std})"
 
+    def make_embedding(self, x, /):
+        return torch.nn.Sequential(
+            Unsqueezer(dim=-1),
+            torch.nn.Linear(in_features=1, out_features=x),
+        )
+
 
 class PitchSequenceDataset(Dataset):
-    FEATURE_TYPING = {
-        "release_speed": Normalizer,
+    MORPHER_MAP = {
+        "numeric": Normalizer,
     }
 
     def __init__(
         self,
         pitch_df,
+        feature_config: dict,
         vocab=None,
         p_mask: float = 0.2,
         max_length: int = 64,
         mask_tokens: bool = False,
     ):
+        numeric_cols = [
+            feat for feat, feat_type in feature_config.items() if feat_type == "numeric"
+        ]
+        pitch_df[numeric_cols] = pitch_df[numeric_cols].astype(np.float32)
+
         self.morphers = {
-            feature: morpher.from_data(pitch_df[feature])
-            for feature, morpher in self.FEATURE_TYPING.items()
+            feature: self.MORPHER_MAP[feature_type].from_data(pitch_df[feature])
+            for feature, feature_type in feature_config.items()
         }
         self.pitcher_games = (
             pitch_df.fillna(
@@ -71,12 +95,12 @@ class PitchSequenceDataset(Dataset):
             )
             .sort_values(["pitch_number"])  # This order's each team's pitches in a game
             .groupby(["pitcher", "batter", "game_pk", "at_bat_number"])  # to get per PA
-            .agg({"pitch_type": list} | {f: list for f in self.FEATURE_TYPING.keys()})
+            .agg({"pitch_type": list} | {f: list for f in feature_config.keys()})
             .reset_index()
             .sort_values(["at_bat_number"])
         )
 
-        pfeat_cols = list(self.FEATURE_TYPING.keys())
+        pfeat_cols = list(feature_config.keys())
         self.pitcher_games[pfeat_cols] = self.pitcher_games[pfeat_cols].applymap(
             np.array
         )
@@ -165,9 +189,13 @@ class PitchSequenceDataset(Dataset):
 
         # Transform and pad the pitch features.
         pitch_features = {
-            feature: torch.tensor(morpher(self.pitcher_games[feature].iloc[idx]))
+            feature: torch.tensor(
+                morpher(self.pitcher_games[feature].iloc[idx]),
+                dtype=morpher.required_dtype,
+            )
             for feature, morpher in self.morphers.items()
         }
+
         pitch_features = {
             feature: F.pad(x, (0, right_pad_length), value=0)
             for feature, x in pitch_features.items()

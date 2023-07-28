@@ -17,7 +17,6 @@ class PositionEncoding(nn.Module):
 
     def forward(self, x):
         x_len = x.shape[1]
-
         return x + self.position_encodings[:, :x_len]
 
 
@@ -36,12 +35,24 @@ class WainoNet(nn.Module):
         n_layers,
         dim_ff,
         dropout,
+        morphers,
     ):
         super().__init__()
 
         self.n_head = n_head
 
-        self.pitch_embedding = nn.Sequential(
+        self.feature_embedder = nn.ModuleDict(
+            {
+                feature: nn.Sequential(
+                    morpher.make_embedding(d_model),
+                    nn.LayerNorm(d_model),
+                    nn.LeakyReLU(),
+                )
+                for feature, morpher in morphers.items()
+            }
+        )
+
+        self.pitch_embedder = nn.Sequential(
             nn.Embedding(
                 math.ceil((n_pitches + 1) / 8) * 8,
                 d_model,
@@ -49,7 +60,7 @@ class WainoNet(nn.Module):
             nn.LayerNorm(d_model),
             nn.LeakyReLU(),
         )
-        self.position_encoding = PositionEncoding(max_length, d_model)
+        self.position_encoder = PositionEncoding(max_length, d_model)
         self.tr = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model,
@@ -66,9 +77,18 @@ class WainoNet(nn.Module):
             nn.Linear(d_model, n_pitches),
         )
 
-    def forward(self, x, pad_mask):
-        x = self.pitch_embedding(x)
-        x = self.position_encoding(x)
+    def forward(self, x, x_features, pad_mask, pretrain_mask):
+        feature_embedding = sum(
+            [
+                embedder(x_features[feature])
+                for feature, embedder in self.feature_embedder.items()
+            ]
+        )
+        # TKTK Deal with magic number
+        feature_embedding[pretrain_mask[:, 3:]] = 0
+        x = self.pitch_embedder(x)
+        x[:, 3:, :] += feature_embedding
+        x = self.position_encoder(x)
         x = self.tr(x, src_key_padding_mask=pad_mask)
         x = self.output_layer(x)
         return x
@@ -86,9 +106,10 @@ class Waino(pl.LightningModule):
         dropout,
         optim_lr,
         mask_tokens,
+        morphers,
     ):
         super().__init__()
-        self.save_hyperparameters()
+        # self.save_hyperparameters()
 
         self.net = WainoNet(
             n_tokens,
@@ -98,6 +119,7 @@ class Waino(pl.LightningModule):
             n_layers,
             dim_ff,
             dropout,
+            morphers,
         )
         self.optim_lr = optim_lr
         self.n_tokens = n_tokens
@@ -124,13 +146,13 @@ class Waino(pl.LightningModule):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.optim_lr)
         return optimizer
 
-    def forward(self, x, pad_map):
+    def forward(self, x, x_features, pad_map, pretrain_mask):
         # Literally this only gets used to make a graph, wtf
 
-        return self.net(x, pad_map)
+        return self.net(x, x_features, pad_map, pretrain_mask)
 
     def step(self, batch, batch_idx):
-        x, pad_mask, pretrain_mask = batch
+        x, x_features, pad_mask, pretrain_mask = batch
 
         if self.mask_tokens:
             # For debugging. I'm literally going to squash the actual values in
@@ -138,9 +160,10 @@ class Waino(pl.LightningModule):
             # If it is, this shouldn't matter.
             x2 = x.clone()
             x2[pretrain_mask] = self.mask_idx
-            y_hat = self.net(x2, pad_mask)
+            # TKTK MASK SPEEDS
+            y_hat = self.net(x2, x_features, pad_mask, pretrain_mask)
         else:
-            y_hat = self.net(x, pad_mask)
+            y_hat = self.net(x, x_features, pad_mask, pretrain_mask)
 
         loss_mask = pretrain_mask & (~pad_mask)
 
