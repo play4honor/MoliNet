@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from .net_layers import Unsqueezer
+from .helper_layers import Unsqueezer
 
 
 class Normalizer:

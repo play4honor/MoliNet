@@ -7,7 +7,7 @@ import torchmetrics
 
 import math
 
-from .net_layers import PositionEncoding
+from .helper_layers import PositionEncoding
 
 
 # Design here is:
