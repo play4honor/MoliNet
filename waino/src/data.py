@@ -120,7 +120,9 @@ class PitchSequenceDataset(Dataset):
             yaml.dump(self.vocab, f)
 
         with open(f"{path}/morphers.yaml", "w") as f:
-            yaml.dump({feat: m.to_dict() for feat, m in self.morphers.items()}, f)
+            yaml.dump(
+                {feat: m.save_state_dict() for feat, m in self.morphers.items()}, f
+            )
 
     def __getitem__(self, idx):
         x = torch.tensor(self.pitcher_games.iloc[idx].pitch_sequence, dtype=torch.long)

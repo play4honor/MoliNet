@@ -61,13 +61,23 @@ class WainoNet(nn.Module):
             ),
             num_layers=n_layers,
         )
-        self.output_layer = nn.Sequential(
+        self.token_predictor = nn.Sequential(
             nn.LayerNorm(d_model),
             nn.LeakyReLU(),
             nn.Linear(d_model, n_pitches),
         )
+        self.feature_predictors = nn.ModuleDict(
+            {
+                feature: nn.Sequential(
+                    nn.LayerNorm(d_model),
+                    nn.LeakyReLU(),
+                    morpher.make_predictor_head(d_model),
+                )
+                for feature, morpher in morphers.items()
+            }
+        )
 
-    def forward(self, x, x_features, pad_mask, pretrain_mask):
+    def forward(self, x, x_features, pad_mask, pretrain_mask=None):
         feature_embedding = sum(
             [
                 embedder(x_features[feature])
@@ -75,13 +85,19 @@ class WainoNet(nn.Module):
             ]
         )
         # TKTK Deal with magic number
-        feature_embedding[pretrain_mask[:, 3:]] = 0
+        # Mask features by setting feature embeddings at masked positions to 0
+        if pretrain_mask is not None:
+            feature_embedding[pretrain_mask[:, 3:]] = 0
         x = self.pitch_embedder(x)
         x[:, 3:, :] += feature_embedding
         x = self.position_encoder(x)
         x = self.tr(x, src_key_padding_mask=pad_mask)
-        x = self.output_layer(x)
-        return x
+        token_predictions = self.token_predictor(x)
+        feature_predictions = {
+            feature: predictor(x)[:, 3:]
+            for feature, predictor in self.feature_predictors.items()
+        }
+        return token_predictions, feature_predictions
 
 
 class Waino(pl.LightningModule):
@@ -114,6 +130,9 @@ class Waino(pl.LightningModule):
         self.optim_lr = optim_lr
         self.n_tokens = n_tokens
         self.criterion = nn.CrossEntropyLoss(reduction="none")
+        self.feature_criteria = {
+            feature: morpher.make_criterion() for feature, morpher in morphers.items()
+        }
 
         self.mask_tokens = mask_tokens
         if mask_tokens:
@@ -150,48 +169,77 @@ class Waino(pl.LightningModule):
             # If it is, this shouldn't matter.
             x2 = x.clone()
             x2[pretrain_mask] = self.mask_idx
-            # TKTK MASK SPEEDS
-            y_hat = self.net(x2, x_features, pad_mask, pretrain_mask)
+            # Features are masked in forward.
+            token_preds, feature_preds = self.net(
+                x2, x_features, pad_mask, pretrain_mask
+            )
         else:
-            y_hat = self.net(x, x_features, pad_mask, pretrain_mask)
+            token_preds, feature_preds = self.net(
+                x, x_features, pad_mask, pretrain_mask
+            )
 
         loss_mask = pretrain_mask & (~pad_mask)
 
-        loss = self.criterion(y_hat.reshape([-1, y_hat.shape[-1]]), x.reshape([-1]))
+        token_loss = self.criterion(
+            token_preds.reshape([-1, token_preds.shape[-1]]), x.reshape([-1])
+        )
+        try:
+            feature_losses = {
+                feat: criterion(
+                    a := feature_preds[feat].squeeze(-1),
+                    b := x_features[feat],
+                )
+                for feat, criterion in self.feature_criteria.items()
+            }
+        except Exception as e:
+            print(a.shape)
+            print(b.shape)
+            raise e
 
         # Get per-masked-token loss
-        loss = (loss * loss_mask.reshape(-1)).sum() / (loss_mask.sum())
+        token_loss = (token_loss * loss_mask.reshape(-1)).sum() / (loss_mask.sum())
+        feature_loss = sum(
+            [loss * loss_mask[:, 3:] for loss in feature_losses.values()]
+        ).sum() / (loss_mask[:, 3:].sum())
 
-        masked_x = x[loss_mask].reshape(-1)
-        masked_y_hat = y_hat[loss_mask].reshape(-1, y_hat.shape[-1])
+        # masked_x = x[loss_mask].reshape(-1)
+        # masked_y_hat = y_hat[loss_mask].reshape(-1, y_hat.shape[-1])
 
-        return masked_x, masked_y_hat, loss
+        return token_loss, feature_loss
 
     def training_step(self, batch, batch_idx):
-        masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
+        # masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
+        token_loss, feature_loss = self.step(batch, batch_idx)
 
-        self.log("train_loss", loss)
-        self.log_dict(
-            {
-                name: metric(masked_y_hat, masked_x)
-                for name, metric in self.metrics.items()
-                if "train" in name
-            }
-        )
+        self.log("train_token_loss", token_loss)
+        self.log("train_feature_loss", feature_loss)
+
+        loss = token_loss + feature_loss
+        # self.log_dict(
+        #     {
+        #         name: metric(masked_y_hat, masked_x)
+        #         for name, metric in self.metrics.items()
+        #         if "train" in name
+        #     }
+        # )
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
+        # masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
+        token_loss, feature_loss = self.step(batch, batch_idx)
 
-        self.log("validation_loss", loss)
-        self.log_dict(
-            {
-                name: metric(masked_y_hat, masked_x)
-                for name, metric in self.metrics.items()
-                if "validation" in name
-            }
-        )
+        self.log("valid_token_loss", token_loss)
+        self.log("valid_feature_loss", feature_loss)
+
+        loss = token_loss + feature_loss
+        # self.log_dict(
+        #     {
+        #         name: metric(masked_y_hat, masked_x)
+        #         for name, metric in self.metrics.items()
+        #         if "validation" in name
+        #     }
+        # )
 
         return loss
 
