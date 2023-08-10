@@ -184,11 +184,15 @@ class Waino(pl.LightningModule):
             token_preds.reshape([-1, token_preds.shape[-1]]), x.reshape([-1])
         )
         try:
-            feature_losses = {
-                feat: criterion(
-                    a := feature_preds[feat].squeeze(-1),
-                    b := x_features[feat],
-                )
+            feat_loss_dict = {
+                feat: (
+                    criterion(
+                        a := feature_preds[feat].squeeze(-1),
+                        b := x_features[feat],
+                    )
+                    * loss_mask[:, 3:]
+                ).sum()
+                / (loss_mask[:, 3:].sum())
                 for feat, criterion in self.feature_criteria.items()
             }
         except Exception as e:
@@ -198,48 +202,29 @@ class Waino(pl.LightningModule):
 
         # Get per-masked-token loss
         token_loss = (token_loss * loss_mask.reshape(-1)).sum() / (loss_mask.sum())
-        feature_loss = sum(
-            [loss * loss_mask[:, 3:] for loss in feature_losses.values()]
-        ).sum() / (loss_mask[:, 3:].sum())
+        feature_loss = sum([loss for loss in feat_loss_dict.values()])
 
-        # masked_x = x[loss_mask].reshape(-1)
-        # masked_y_hat = y_hat[loss_mask].reshape(-1, y_hat.shape[-1])
-
-        return token_loss, feature_loss
+        return token_loss, feature_loss, feat_loss_dict
 
     def training_step(self, batch, batch_idx):
-        # masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
-        token_loss, feature_loss = self.step(batch, batch_idx)
+        token_loss, feature_loss, feat_loss_dict = self.step(batch, batch_idx)
 
         self.log("train_token_loss", token_loss)
         self.log("train_feature_loss", feature_loss)
+        self.log_dict({f"train_{k}_loss": v for k, v in feat_loss_dict.items()})
 
         loss = token_loss + feature_loss
-        # self.log_dict(
-        #     {
-        #         name: metric(masked_y_hat, masked_x)
-        #         for name, metric in self.metrics.items()
-        #         if "train" in name
-        #     }
-        # )
 
         return loss
 
     def validation_step(self, batch, batch_idx):
-        # masked_x, masked_y_hat, loss = self.step(batch, batch_idx)
-        token_loss, feature_loss = self.step(batch, batch_idx)
+        token_loss, feature_loss, feat_loss_dict = self.step(batch, batch_idx)
 
         self.log("valid_token_loss", token_loss)
         self.log("valid_feature_loss", feature_loss)
+        self.log_dict({f"valid_{k}_loss": v for k, v in feat_loss_dict.items()})
 
         loss = token_loss + feature_loss
-        # self.log_dict(
-        #     {
-        #         name: metric(masked_y_hat, masked_x)
-        #         for name, metric in self.metrics.items()
-        #         if "validation" in name
-        #     }
-        # )
 
         return loss
 

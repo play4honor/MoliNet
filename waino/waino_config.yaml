@@ -1,4 +1,5 @@
-data: "./data/bigger_training_data.parquet"
+# data: "./data/bigger_training_data.parquet"
+data: "./data/test_data.parquet"
 
 training_params:
   learning_rate: 0.0001
@@ -21,3 +22,7 @@ net_params:
 
 features:
   release_speed: numeric
+  pfx_x: numeric
+  pfx_z: numeric
+  stand: categorical
+  zone: categorical

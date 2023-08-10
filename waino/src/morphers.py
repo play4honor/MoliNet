@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from pandas import NA
 import torch
 
 from .helper_layers import Unsqueezer
@@ -100,3 +101,47 @@ class Normalizer(Morpher):
 
     def make_criterion(self):
         return torch.nn.MSELoss(reduction="none")
+
+
+class Integerizer(Morpher):
+    def __init__(self, vocab):
+        self.vocab = vocab
+
+    @property
+    def required_dtype(self):
+        return torch.int64
+
+    def __call__(self, x):
+        return [self.vocab.get(item, self.vocab["<MISSING>"]) for item in x]
+
+    @classmethod
+    def from_data(cls, x):
+        # Wes why...
+        vocab = {t: i for i, t in enumerate(x.unique()) if t is not NA}
+        vocab["<MISSING>"] = len(vocab)
+
+        return cls(vocab)
+
+    def save_state_dict(self):
+        return self.vocab
+
+    @classmethod
+    def from_state_dict(cls, state_dict):
+        return cls(state_dict)
+
+    def __repr__(self):
+        return f"Integerizer(<{len(self.vocab)} items>)"
+
+    def make_embedding(self, x, /):
+        return torch.nn.Embedding(len(self.vocab), x)
+
+    def make_predictor_head(self, x, /):
+        return torch.nn.Linear(in_features=x, out_features=len(self.vocab))
+
+    def make_criterion(self):
+        def fixed_ce_loss(input, target):
+            return torch.nn.functional.cross_entropy(
+                input.permute(0, 2, 1), target, reduction="none"
+            )
+
+        return fixed_ce_loss

@@ -7,12 +7,13 @@ from torch.utils.data import Dataset
 
 import yaml
 
-from .morphers import Normalizer
+from .morphers import Normalizer, Integerizer
 
 
 class PitchSequenceDataset(Dataset):
     MORPHER_MAP = {
         "numeric": Normalizer,
+        "categorical": Integerizer,
     }
 
     def __init__(
@@ -120,9 +121,17 @@ class PitchSequenceDataset(Dataset):
             yaml.dump(self.vocab, f)
 
         with open(f"{path}/morphers.yaml", "w") as f:
-            yaml.dump(
-                {feat: m.save_state_dict() for feat, m in self.morphers.items()}, f
-            )
+            try:
+                yaml.dump(
+                    {
+                        feat: (a := m.save_state_dict())
+                        for feat, m in self.morphers.items()
+                    },
+                    f,
+                )
+            except Exception as e:
+                print(a)
+                raise e
 
     def __getitem__(self, idx):
         x = torch.tensor(self.pitcher_games.iloc[idx].pitch_sequence, dtype=torch.long)
