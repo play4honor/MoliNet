@@ -1,8 +1,7 @@
-import pandas as pd
+import polars as pl
 import yaml
 
 from torch.utils.data import DataLoader, Subset
-import torch
 
 from lightning.pytorch import Trainer
 
@@ -22,11 +21,9 @@ with open("./waino/waino_config.yaml", "r") as f:
 
 print(f"Loading and transforming data from {config['data']}")
 
-pitch_df = pd.read_parquet(config["data"])
-
-missing_games = pitch_df.game_pk[pitch_df.pitch_type.isna()].value_counts()
-missing_games = missing_games[missing_games > 30]
-pitch_df = pitch_df.loc[~pitch_df.game_pk.isin(missing_games.index)]
+pitch_df = pl.read_parquet(config["data"])
+# Filter games with mostly missing pitch data
+pitch_df = pitch_df.filter(pl.col("pitch_type").is_null().sum().over("game_pk") <= 30)
 
 ds = PitchSequenceDataset(
     pitch_df,

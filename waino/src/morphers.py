@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
-from pandas import NA
 import torch
 
 from .helper_layers import Unsqueezer
@@ -59,6 +58,7 @@ class Normalizer(Morpher):
         return torch.float32
 
     def normalize(self, x):
+        x = np.array(x, dtype="float32")
         x = (x - self.mean) / self.std
         return np.nan_to_num(x, self.mean)
 
@@ -117,7 +117,11 @@ class Integerizer(Morpher):
     @classmethod
     def from_data(cls, x):
         # Wes why...
-        vocab = {t: i for i, t in enumerate(x.unique()) if t is not NA}
+        vocab = {
+            t: i
+            for i, t in enumerate(np.unique(x))
+            if not isinstance(t, np.generic) or not np.isnan(t)
+        }
         vocab["<MISSING>"] = len(vocab)
 
         return cls(vocab)

@@ -1,5 +1,4 @@
-import pandas as pd
-import numpy as np
+import polars as pl
 
 import torch
 import torch.nn.functional as F
@@ -28,38 +27,13 @@ class PitchSequenceDataset(Dataset):
         numeric_cols = [
             feat for feat, feat_type in feature_config.items() if feat_type == "numeric"
         ]
-        pitch_df[numeric_cols] = pitch_df[numeric_cols].astype(np.float32)
-
-        self.morphers = {
-            feature: self.MORPHER_MAP[feature_type].from_data(pitch_df[feature])
-            for feature, feature_type in feature_config.items()
-        }
-        self.pitcher_games = (
-            pitch_df.fillna(
-                {
-                    "pitch_type": "MISSING",
-                }
-            )
-            .sort_values(["pitch_number"])  # This order's each team's pitches in a game
-            .groupby(["pitcher", "batter", "game_pk", "at_bat_number"])  # to get per PA
-            .agg({"pitch_type": list} | {f: list for f in feature_config.keys()})
-            .reset_index()
-            .sort_values(["at_bat_number"])
+        pitch_df = pitch_df.with_columns(
+            *[pl.col(ncol).cast(pl.Float32) for ncol in numeric_cols]
         )
 
-        pfeat_cols = list(feature_config.keys())
-        self.pitcher_games[pfeat_cols] = self.pitcher_games[pfeat_cols].applymap(
-            np.array
-        )
-
-        self.pitcher_games["n_batters_faced"] = self.pitcher_games.groupby(
-            ["pitcher", "game_pk"]
-        ).cumcount()
-        max_batters_faced = self.pitcher_games.n_batters_faced.max()
-
-        self.pitcher_games["pitch_sequence"] = self.pitcher_games.apply(
-            self._make_pitch_sequence, axis=1
-        )
+        max_batters_faced = pitch_df.select(
+            pl.n_unique("at_bat_number").over(["game_pk", "pitcher"]).max()
+        ).item()
 
         self.vocab = (
             self._make_vocab(pitch_df, max_batters_faced, mask_tokens)
@@ -67,28 +41,66 @@ class PitchSequenceDataset(Dataset):
             else vocab
         )
 
+        self.morphers = {
+            feature: self.MORPHER_MAP[feature_type].from_data(
+                pitch_df[feature].to_numpy()
+            )
+            for feature, feature_type in feature_config.items()
+        }
+
+        self.pitcher_games = (
+            pitch_df.with_columns(
+                pl.col("pitch_type")
+                .fill_null("MISSING")
+                .map_dict(self.vocab, return_dtype=pl.Int32),
+                pl.col("at_bat_number")
+                .cumcount()
+                .over(["pitcher", "game_pk"])
+                .str.replace(r"(.+)", r"BF_$1")
+                .map_dict(self.vocab, return_dtype=pl.Int32)
+                .alias("n_batters_faced"),
+                pl.col("pitcher")
+                .str.replace(r"(.+)", r"P_$1")
+                .map_dict(self.vocab, return_dtype=pl.Int32),
+                pl.col("batter")
+                .str.replace(r"(.+)", r"B_$1")
+                .map_dict(self.vocab, return_dtype=pl.Int32),
+            )
+            .groupby(["pitcher", "batter", "game_pk", "at_bat_number"])
+            .agg(
+                *[
+                    pl.col(fcol).sort_by(pl.col("pitch_number"))
+                    for fcol in ["pitch_type"] + list(feature_config.keys())
+                ]
+            )
+            .sort(pl.col("at_bat_number"))
+        )
+
+        self.pitcher_games = self.pitcher_games.with_columns(
+            pl.col("at_bat_number")
+            .cumcount()
+            .over(["pitcher", "game_pk"])
+            .alias("n_batters_faced")
+        )
+
+        self.pitcher_games = self.pitcher_games.with_columns(
+            pl.concat_list(
+                pl.col("n_batters_faced"),
+                pl.col("pitcher"),
+                pl.col("batter"),
+                pl.col("pitch_type"),
+            ).alias("pitch_sequence")
+        )
+
         self.p_mask = p_mask
         self.max_length = max_length
 
-        # Just apply the vocab in advance
-        self.pitcher_games.pitch_sequence = self.pitcher_games.pitch_sequence.map(
-            lambda x: [self.vocab[z] for z in x]
-        )
-
-    def _make_pitch_sequence(self, row):
-        return (
-            [f"BF_{row.n_batters_faced}"]
-            + [f"P_{row.pitcher}"]
-            + [f"B_{row.batter}"]
-            + row.pitch_type
-        )
-
     def _make_vocab(self, df, max_batters_faced, mask_tokens):
-        pdf = df.fillna({"pitch_type": "MISSING"})
-        pitches = pdf.pitch_type.unique().tolist()
+        pdf = df.with_columns(pl.col("pitch_type").fill_null("MISSING"))
+        pitches = pdf["pitch_type"].unique().to_list()
 
-        pitchers = [f"P_{p}" for p in pdf.pitcher.unique().tolist()]
-        batters = [f"B_{b}" for b in pdf.batter.unique().tolist()]
+        pitchers = [f"P_{p}" for p in pdf["pitcher"].unique().to_list()]
+        batters = [f"B_{b}" for b in pdf["batter"].unique().to_list()]
 
         batters_faced_tokens = [f"BF_{i}" for i in range(max_batters_faced + 1)]
 
@@ -134,7 +146,8 @@ class PitchSequenceDataset(Dataset):
                 raise e
 
     def __getitem__(self, idx):
-        x = torch.tensor(self.pitcher_games.iloc[idx].pitch_sequence, dtype=torch.long)
+        row = self.pitcher_games.row(idx, named=True)
+        x = torch.tensor(row["pitch_sequence"], dtype=torch.long)
 
         # Remove anything over the maximum size
         x = x[: min(self.max_length, x.shape[0])]
@@ -146,10 +159,7 @@ class PitchSequenceDataset(Dataset):
 
         # Transform and pad the pitch features.
         pitch_features = {
-            feature: torch.tensor(
-                morpher(self.pitcher_games[feature].iloc[idx]),
-                dtype=morpher.required_dtype,
-            )
+            feature: torch.tensor(morpher(row[feature]), dtype=morpher.required_dtype)
             for feature, morpher in self.morphers.items()
         }
 
@@ -184,7 +194,7 @@ if __name__ == "__main__":
     with open("./waino/waino_config.yaml", "r") as f:
         config = yaml.load(f, yaml.CLoader)
 
-    pitch_df = pd.read_parquet("./data/test_data.parquet")
+    pitch_df = pl.read_parquet("./data/test_data.parquet")
 
     ds = PitchSequenceDataset(
         pitch_df,
