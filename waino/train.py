@@ -2,7 +2,6 @@ import pandas as pd
 import yaml
 
 from torch.utils.data import DataLoader, Subset
-import torch
 
 from lightning.pytorch import Trainer
 
@@ -10,6 +9,7 @@ from src.data import PitchSequenceDataset
 from src.net import Waino
 
 import random
+from time import perf_counter
 
 # Setup config ------------------
 
@@ -59,13 +59,19 @@ print(
 
 # Setup network -----------------
 
+tick = perf_counter()
+
 net = Waino(
     **config["net_params"],
     n_tokens=len(ds.get_vocab()),
     optim_lr=config["training_params"]["learning_rate"],
     mask_tokens=config["training_params"]["mask_tokens"],
     morphers=train_ds.dataset.morphers,
+    compile_model=True,
 )
+
+tock = perf_counter()
+print(f"Took {tock-tick :.3f} seconds to initialize model")
 
 print(f"Created model with {sum(p.numel() for p in net.parameters())} weights.")
 
@@ -79,4 +85,9 @@ if __name__ == "__main__":
         precision="16-mixed",
     )
 
+    tick = perf_counter()
+
     trainer.fit(net, train_dataloaders=train_dl, val_dataloaders=validation_dl)
+
+    tock = perf_counter()
+    print(f"Took {tock-tick :.3f} seconds to train 2 epochs")

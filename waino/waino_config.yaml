@@ -1,10 +1,10 @@
-# data: "./data/bigger_training_data.parquet"
-data: "./data/test_data.parquet"
+data: "./data/bigger_training_data.parquet"
+# data: "./data/test_data.parquet"
 
 training_params:
   learning_rate: 0.0001
   batch_size: 1024
-  max_epochs: 7
+  max_epochs: 2
   num_workers: 0
   log_every_n: 1
   accumulate_grad_batches: 1

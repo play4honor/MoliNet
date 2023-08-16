@@ -113,6 +113,7 @@ class Waino(pl.LightningModule):
         optim_lr,
         mask_tokens,
         morphers,
+        compile_model=False,
     ):
         super().__init__()
         # self.save_hyperparameters()
@@ -127,6 +128,8 @@ class Waino(pl.LightningModule):
             dropout,
             morphers,
         )
+        if compile_model:
+            self.net = torch.compile(self.net, backend="inductor")
         self.optim_lr = optim_lr
         self.n_tokens = n_tokens
         self.criterion = nn.CrossEntropyLoss(reduction="none")
