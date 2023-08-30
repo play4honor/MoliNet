@@ -71,8 +71,8 @@ class Normalizer(Morpher):
 
     @classmethod
     def from_data(cls, x):
-        mean = x.mean()
-        std = x.std()
+        mean = x.mean(where=~np.isnan(x))
+        std = x.std(where=~np.isnan(x))
 
         return cls(mean, std)
 
@@ -116,7 +116,6 @@ class Integerizer(Morpher):
 
     @classmethod
     def from_data(cls, x):
-        # Wes why...
         vocab = {
             t: i
             for i, t in enumerate(np.unique(x))
