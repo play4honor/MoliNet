@@ -22,3 +22,17 @@ class Unsqueezer(torch.nn.Module):
 
     def forward(self, x):
         return x.unsqueeze(self.dim)
+
+
+class QuantileEmbedding(torch.nn.Module):
+    def __init__(self, quantiles):
+        super().__init__()
+        self.register_buffer("quantiles", quantiles.unsqueeze(0))
+        self.output_size = self.quantiles.numel() - 1
+
+    def forward(self, x):
+        # x should be n x 1, self.quantiles should be 1 x k
+        x = x - self.quantiles[:, :-1]
+        x = x / (self.quantiles[:, 1:] - self.quantiles[:, :-1])
+        x = torch.clamp(x, 0, 1)
+        return x

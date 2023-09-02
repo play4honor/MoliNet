@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch
 
-from .helper_layers import Unsqueezer
+from .helper_layers import Unsqueezer, QuantileEmbedding
 
 
 class Morpher(ABC):
@@ -101,6 +101,56 @@ class Normalizer(Morpher):
 
     def make_criterion(self):
         return torch.nn.MSELoss(reduction="none")
+
+
+class QuantileEmbedder(Normalizer):
+    """Implements the weird quantile embedding from the paper I'm too lazy
+    to look up at the moment."""
+
+    # I don't know a better way to set this.
+    NUM_QUANTILES = 17
+
+    def __init__(self, mean, std, quantiles):
+        # Set the mean and standard deviation as usual
+        super().__init__(mean, std)
+
+        if isinstance(quantiles, (np.ndarray, torch.Tensor)):
+            self.quantiles = quantiles.tolist()
+        else:
+            self.quantiles = quantiles
+
+    @classmethod
+    def from_data(cls, x):
+        mean = x.mean(where=~np.isnan(x))
+        std = x.std(where=~np.isnan(x))
+        quantiles = np.quantile(x[~np.isnan(x)], np.linspace(0, 1, cls.NUM_QUANTILES))
+        assert not np.any(np.isnan(quantiles))
+
+        return cls(mean, std, quantiles)
+
+    def make_embedding(self, x):
+        qe = QuantileEmbedding(torch.tensor(self.quantiles, dtype=self.required_dtype))
+        return torch.nn.Sequential(
+            Unsqueezer(dim=-1),
+            qe,
+            torch.nn.Linear(in_features=qe.output_size, out_features=x),
+        )
+
+    def save_state_dict(self):
+        return {
+            "class": "QuantileEmbedder",
+            "mean": self.mean,
+            "std": self.std,
+            "quantiles": self.quantiles,
+        }
+
+    @classmethod
+    def from_state_dict(cls, state_dict):
+        return cls(
+            mean=state_dict["mean"],
+            std=state_dict["std"],
+            quantiles=state_dict["quantiles"],
+        )
 
 
 class Integerizer(Morpher):

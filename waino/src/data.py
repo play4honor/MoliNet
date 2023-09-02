@@ -6,12 +6,12 @@ from torch.utils.data import Dataset
 
 import yaml
 
-from .morphers import Normalizer, Integerizer
+from .morphers import Normalizer, Integerizer, QuantileEmbedder
 
 
 class PitchSequenceDataset(Dataset):
     MORPHER_MAP = {
-        "numeric": Normalizer,
+        "numeric": QuantileEmbedder,
         "categorical": Integerizer,
     }
 
