@@ -3,7 +3,10 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch
 
-from .helper_layers import Unsqueezer
+import sys
+
+sys.path.insert(0, ".")
+from src.helper_layers import Unsqueezer
 
 
 class Morpher(ABC):
@@ -57,10 +60,13 @@ class Normalizer(Morpher):
     def required_dtype(self):
         return torch.float32
 
+    @property
+    def missing_value(self):
+        return self.mean
+
     def normalize(self, x):
-        x = np.array(x, dtype="float32")
         x = (x - self.mean) / self.std
-        return np.nan_to_num(x, self.mean)
+        return x.fill_nan(self.mean)
 
     def denormalize(self, x):
         # reverse operation
@@ -71,8 +77,8 @@ class Normalizer(Morpher):
 
     @classmethod
     def from_data(cls, x):
-        mean = x.mean(where=~np.isnan(x))
-        std = x.std(where=~np.isnan(x))
+        mean = x.mean()
+        std = x.std()
 
         return cls(mean, std)
 
@@ -104,6 +110,8 @@ class Normalizer(Morpher):
 
 
 class Integerizer(Morpher):
+    MISSING_VALUE = "<MISSING>"
+
     def __init__(self, vocab):
         self.vocab = vocab
 
@@ -111,17 +119,25 @@ class Integerizer(Morpher):
     def required_dtype(self):
         return torch.int64
 
+    @property
+    def missing_value(self):
+        return self.MISSING_VALUE
+
     def __call__(self, x):
-        return [self.vocab.get(item, self.vocab["<MISSING>"]) for item in x]
+        try:
+            return x.map_dict(self.vocab, default=len(self.vocab))
+        except:
+            print(self.vocab)
+            raise Exception
 
     @classmethod
     def from_data(cls, x):
         vocab = {
             t: i
-            for i, t in enumerate(np.unique(x))
-            if not isinstance(t, np.generic) or not np.isnan(t)
+            for i, t in enumerate(x.filter(x.is_not_null()).unique())
+            # if not isinstance(t, np.generic) or np.isnan(t)
         }
-        vocab["<MISSING>"] = len(vocab)
+        # vocab[cls.MISSING_VALUE] = len(vocab)
 
         return cls(vocab)
 
