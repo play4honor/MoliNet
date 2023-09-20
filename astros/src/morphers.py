@@ -6,7 +6,7 @@ import torch
 import sys
 
 sys.path.insert(0, ".")
-from src.helper_layers import Unsqueezer
+from src.helper_layers import Unsqueezer, CPCLoss
 
 
 class Morpher(ABC):
@@ -164,3 +164,20 @@ class Integerizer(Morpher):
             )
 
         return fixed_ce_loss
+
+class BigIntegerizer(Integerizer):
+
+    N_NEGATIVE_SAMPLES = 15
+
+    def make_embedding(self, x, /):
+
+        self.embedding_layer = torch.nn.Embedding(len(self.vocab) + 1, x)
+        return self.embedding_layer
+    
+    def make_predictor_head(self, x, /):
+        return torch.nn.Linear(in_features=x, out_features=x)
+
+    def make_criterion(self):
+        if not hasattr(self, "embedding_layer"):
+            raise RuntimeError("make_embedding must be called before make_criterion.")
+        return CPCLoss(self.embedding_layer, self.N_NEGATIVE_SAMPLES)

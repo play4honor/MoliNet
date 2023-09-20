@@ -10,13 +10,14 @@ import sys
 import itertools
 
 sys.path.insert(0, ".")
-from src.morphers import Normalizer, Integerizer
+from src.morphers import Normalizer, Integerizer, BigIntegerizer
 
 
 class PitchSequenceDataset(Dataset):
     MORPHER_MAP = {
         "numeric": Normalizer,
         "categorical": Integerizer,
+        "bigcat": BigIntegerizer,
     }
 
     def __init__(

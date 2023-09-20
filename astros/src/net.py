@@ -4,7 +4,7 @@ from torch import nn
 import lightning.pytorch as pl
 from lightning.pytorch.utilities import grad_norm
 
-from .helper_layers import PositionEncoding
+from .helper_layers import BoringPositionalEncoding
 
 
 class GarbageCan(nn.Module):
@@ -33,7 +33,7 @@ class GarbageCan(nn.Module):
             }
         )
 
-        self.position_encoder = PositionEncoding(sequence_length, d_model)
+        self.position_encoder = BoringPositionalEncoding(sequence_length, d_model)
         self.tr = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model,

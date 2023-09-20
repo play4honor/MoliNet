@@ -3,11 +3,11 @@ data: "./data/bigger_training_data.parquet"
 
 training_params:
   learning_rate: 0.0001
-  batch_size: 1024
+  batch_size: 256
   max_epochs: 7
   num_workers: 0
   log_every_n: 1
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 4
   p_mask: 0.2
   mask_tokens: True
   holdout_prob: .1
