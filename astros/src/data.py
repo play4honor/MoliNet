@@ -25,6 +25,7 @@ class PitchSequenceDataset(Dataset):
         pitch_df,
         feature_config: dict,
         sequence_length: int = 64,
+        morpher_states: dict = None,
     ):
         self.sequence_length = sequence_length
 
@@ -44,10 +45,20 @@ class PitchSequenceDataset(Dataset):
             *[pl.col(ncol).cast(pl.Float32) for ncol in numeric_cols]
         )
 
-        self.morphers = {
-            feature: self.MORPHER_MAP[feature_type].from_data(pitch_df[feature])
-            for feature, feature_type in feature_config.items()
-        }
+        # If we have saved morpher states. They still need to match the config.
+        if morpher_states is not None:
+            print("Using saved morpher states.")
+            self.morphers = {
+                feature: self.MORPHER_MAP[feature_type].from_state_dict(
+                    morpher_states[feature]
+                )
+                for feature, feature_type in feature_config.items()
+            }
+        else:
+            self.morphers = {
+                feature: self.MORPHER_MAP[feature_type].from_data(pitch_df[feature])
+                for feature, feature_type in feature_config.items()
+            }
 
         # Get the n_batters_faced feature
         pitches = pitch_df.select(
