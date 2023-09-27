@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, Subset
 
 from lightning.pytorch import Trainer
 from lightning.pytorch.profilers import SimpleProfiler, AdvancedProfiler
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 from src.data import PitchSequenceDataset
 from src.net import AstrosNet
@@ -80,6 +81,7 @@ if __name__ == "__main__":
         precision="16-mixed",
         # profiler=SimpleProfiler(),
         # fast_dev_run=10,
+        callbacks=[ModelCheckpoint(save_top_k=-1)],
     )
 
     trainer.fit(net, train_dataloaders=train_dl, val_dataloaders=validation_dl)

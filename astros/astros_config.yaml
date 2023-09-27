@@ -21,14 +21,14 @@ net_params:
   dropout: 0.2
 
 features:
-  release_speed: numeric
-  pfx_x: numeric
-  pfx_z: numeric
-  n_batters_faced: numeric
-  stand: categorical
-  zone: categorical
+  # release_speed: numeric
+  # pfx_x: numeric
+  # pfx_z: numeric
+  # n_batters_faced: numeric
+  # stand: categorical
+  # zone: categorical
   pitcher: categorical
-  batter: categorical
-  pitch_type: categorical
-  description: categorical
-  events: categorical
+  # batter: categorical
+  # pitch_type: categorical
+  # description: categorical
+  # events: categorical

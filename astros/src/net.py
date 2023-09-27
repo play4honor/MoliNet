@@ -33,6 +33,8 @@ class GarbageCan(nn.Module):
             }
         )
 
+        self.sog_embedder = nn.Embedding(2, embedding_dim=d_model)
+
         self.position_encoder = BoringPositionalEncoding(sequence_length, d_model)
         self.tr = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
@@ -56,12 +58,15 @@ class GarbageCan(nn.Module):
             }
         )
 
-    def forward(self, x_features):
+    def forward(self, x_features, sog_tensor):
+
+        sog_embeddings = self.sog_embedder(sog_tensor.long())
+
         x = sum(
             [
                 embedder(x_features[feature])
                 for feature, embedder in self.feature_embedder.items()
-            ]
+            ] + [sog_embeddings]
         )
 
         x = self.position_encoder(x)
@@ -115,9 +120,12 @@ class AstrosNet(pl.LightningModule):
     def step(self, batch, batch_idx):
         x, is_sog = batch
 
-        feature_preds = self.net(x)
+        feature_preds = self.net(x, is_sog)
 
-        loss_mask = is_sog.bool()
+        # This is the opposite of the "true is masked" sense
+        # This makes sure we keep informational positions
+        # We paid too high a price for progress...
+        inverse_loss_mask = ~(is_sog.bool())
 
         feat_loss_dict = {
             feat: (
@@ -125,9 +133,9 @@ class AstrosNet(pl.LightningModule):
                     feature_preds[feat].squeeze(-1)[:, :-1],
                     x[feat][:, 1:],
                 )
-                * loss_mask[:, :-1]
+                * inverse_loss_mask[:, 1:]
             ).sum()
-            / (loss_mask[:, :-1].sum())
+            / (inverse_loss_mask[:, 1:].sum())
             for feat, criterion in self.feature_criteria.items()
         }
 
@@ -155,3 +163,6 @@ class AstrosNet(pl.LightningModule):
     def on_before_optimizer_step(self, optimizer):
         norms = grad_norm(self.net, norm_type=2)
         self.log_dict(norms)
+
+    def forward(self, x_features, is_sog):
+        return self.net.forward(x_features, is_sog)
