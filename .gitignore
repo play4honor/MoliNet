@@ -132,3 +132,4 @@ dmypy.json
 .vscode/
 *.parquet
 lightning_logs/
+checkpoint/
