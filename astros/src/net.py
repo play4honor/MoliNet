@@ -59,14 +59,14 @@ class GarbageCan(nn.Module):
         )
 
     def forward(self, x_features, sog_tensor):
-
         sog_embeddings = self.sog_embedder(sog_tensor.long())
 
         x = sum(
             [
                 embedder(x_features[feature])
                 for feature, embedder in self.feature_embedder.items()
-            ] + [sog_embeddings]
+            ]
+            + [sog_embeddings]
         )
 
         x = self.position_encoder(x)
