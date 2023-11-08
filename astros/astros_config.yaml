@@ -21,16 +21,20 @@ net_params:
   dropout: 0.2
 
 features:
-  release_speed: numeric
-  pfx_x: numeric
-  pfx_z: numeric
-  n_batters_faced: numeric
-  stand: categorical
-  zone: categorical
-  pitcher: categorical
-  batter: categorical
-  pitch_type: categorical
-  description: categorical
-  events: categorical
-  inning_topbot: categorical
+  release_speed: {type: numeric}
+  pfx_x: {type: numeric}
+  pfx_z: {type: numeric}
+  n_batters_faced: {type: numeric}
+  stand: {type: categorical}
+  zone: {type: categorical}
+  pitcher: 
+    type: categorical
+    kwargs: {p_mask: 0.005}
+  batter: 
+    type: categorical
+    kwargs: {p_mask: 0.005}
+  pitch_type: {type: categorical}
+  description: {type: categorical}
+  events: {type: categorical}
+  inning_topbot: {type: categorical}
   

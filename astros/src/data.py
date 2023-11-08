@@ -56,8 +56,10 @@ class PitchSequenceDataset(Dataset):
             }
         else:
             self.morphers = {
-                feature: self.MORPHER_MAP[feature_type].from_data(pitch_df[feature])
-                for feature, feature_type in feature_config.items()
+                feature: self.MORPHER_MAP[feature_spec["type"]].from_data(
+                    pitch_df[feature], **feature_spec.get("kwargs", dict())
+                )
+                for feature, feature_spec in feature_config.items()
             }
 
         # Get the n_batters_faced feature
@@ -66,6 +68,14 @@ class PitchSequenceDataset(Dataset):
             pl.col("game_pk"),
             pl.col("at_bat_number"),
             pl.col("pitch_number"),
+        )
+
+        pitches = pitches.with_columns(
+            temp=pl.lit(torch.rand(pitches.height).numpy()),
+        ).with_columns(
+            pitcher=pl.when(pl.col("temp").first().over(["pitcher", "game_pk"]) < 0.01)
+            .then(pl.lit(len(self.morphers["pitcher"].vocab)))
+            .otherwise(pl.col("pitcher")),
         )
 
         # Sorry

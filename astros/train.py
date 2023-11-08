@@ -32,6 +32,7 @@ ds = PitchSequenceDataset(
     feature_config=config["features"],
     sequence_length=config["net_params"]["sequence_length"],
 )
+
 ds.save_state("./reference")
 
 n_val = int(len(ds) * config["training_params"]["holdout_prob"])

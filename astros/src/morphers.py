@@ -112,8 +112,9 @@ class Normalizer(Morpher):
 class Integerizer(Morpher):
     MISSING_VALUE = "<MISSING>"
 
-    def __init__(self, vocab):
+    def __init__(self, vocab, p_mask):
         self.vocab = vocab
+        self.p_mask = p_mask
 
     @property
     def required_dtype(self):
@@ -124,29 +125,23 @@ class Integerizer(Morpher):
         return self.MISSING_VALUE
 
     def __call__(self, x):
-        try:
-            return x.map_dict(self.vocab, default=len(self.vocab))
-        except:
-            print(self.vocab)
-            raise Exception
+        return x.map_dict(self.vocab, default=len(self.vocab))
+
+    def grouped_mask(self, x, grouping_var):
+        return 2
 
     @classmethod
-    def from_data(cls, x):
-        vocab = {
-            t: i
-            for i, t in enumerate(x.filter(x.is_not_null()).unique())
-            # if not isinstance(t, np.generic) or np.isnan(t)
-        }
-        # vocab[cls.MISSING_VALUE] = len(vocab)
+    def from_data(cls, x, p_mask=None):
+        vocab = {t: i for i, t in enumerate(x.filter(x.is_not_null()).unique())}
 
-        return cls(vocab)
+        return cls(vocab, p_mask)
 
     def save_state_dict(self):
-        return self.vocab
+        return {"vocab": self.vocab, "kwargs": {"p_mask": self.p_mask}}
 
     @classmethod
     def from_state_dict(cls, state_dict):
-        return cls(state_dict)
+        return cls(state_dict["vocab"], state_dict["p_mask"])
 
     def __repr__(self):
         return f"Integerizer(<{len(self.vocab)} items>)"
@@ -165,15 +160,14 @@ class Integerizer(Morpher):
 
         return fixed_ce_loss
 
-class BigIntegerizer(Integerizer):
 
+class BigIntegerizer(Integerizer):
     N_NEGATIVE_SAMPLES = 15
 
     def make_embedding(self, x, /):
-
         self.embedding_layer = torch.nn.Embedding(len(self.vocab) + 1, x)
         return self.embedding_layer
-    
+
     def make_predictor_head(self, x, /):
         return torch.nn.Linear(in_features=x, out_features=x)
 
