@@ -127,9 +127,6 @@ class Integerizer(Morpher):
     def __call__(self, x):
         return x.map_dict(self.vocab, default=len(self.vocab))
 
-    def grouped_mask(self, x, grouping_var):
-        return 2
-
     @classmethod
     def from_data(cls, x, p_mask=None):
         vocab = {t: i for i, t in enumerate(x.filter(x.is_not_null()).unique())}

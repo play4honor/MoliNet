@@ -7,7 +7,7 @@ from lightning.pytorch import Trainer
 from lightning.pytorch.profilers import SimpleProfiler, AdvancedProfiler
 from lightning.pytorch.callbacks import ModelCheckpoint
 
-from src.data import PitchSequenceDataset
+from src.data import PitchSequenceDataset, MaskCollator
 from src.net import AstrosNet
 
 import random
@@ -33,6 +33,13 @@ ds = PitchSequenceDataset(
     sequence_length=config["net_params"]["sequence_length"],
 )
 
+mask_collator = MaskCollator(
+    {
+        "pitcher": len(ds.morphers["pitcher"].vocab),
+        "batter": len(ds.morphers["batter"].vocab),
+    }
+)
+
 ds.save_state("./reference")
 
 n_val = int(len(ds) * config["training_params"]["holdout_prob"])
@@ -49,6 +56,7 @@ train_dl = DataLoader(
     batch_size=config["training_params"]["batch_size"],
     shuffle=True,
     num_workers=0,
+    collate_fn=mask_collator,
 )
 validation_dl = DataLoader(
     validation_ds,

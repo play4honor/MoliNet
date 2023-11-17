@@ -2,7 +2,7 @@ import polars as pl
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, default_collate
 
 import yaml
 
@@ -70,14 +70,6 @@ class PitchSequenceDataset(Dataset):
             pl.col("pitch_number"),
         )
 
-        pitches = pitches.with_columns(
-            temp=pl.lit(torch.rand(pitches.height).numpy()),
-        ).with_columns(
-            pitcher=pl.when(pl.col("temp").first().over(["pitcher", "game_pk"]) < 0.01)
-            .then(pl.lit(len(self.morphers["pitcher"].vocab)))
-            .otherwise(pl.col("pitcher")),
-        )
-
         # Sorry
         ordered_games = pitches.sort(["at_bat_number", "pitch_number"]).with_columns(
             pl.lit(False).alias("is_sog")
@@ -110,6 +102,22 @@ class PitchSequenceDataset(Dataset):
             feature: torch.tensor(pitch_subset[feature], dtype=morpher.required_dtype)
             for feature, morpher in self.morphers.items()
         }, torch.tensor(pitch_subset["is_sog"], dtype=torch.bool)
+
+
+class MaskCollator:
+    def __init__(self, mask_vals: dict[str, int], p: float = 0.01):
+        self.mask_vals = mask_vals
+        self.p = p
+
+    def __call__(self, batch):
+        batch, sog = default_collate(batch)
+        for column, mask_value in self.mask_vals.items():
+            unique_vals = batch[column].unique()
+            to_mask = unique_vals[torch.rand(unique_vals.shape) < self.p]
+            mask_pos = torch.isin(batch[column], to_mask)
+            batch[column][mask_pos] = mask_value
+
+        return batch, sog
 
 
 if __name__ == "__main__":
