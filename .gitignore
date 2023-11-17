@@ -76,6 +76,7 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+*scratch.ipynb
 
 # IPython
 profile_default/
@@ -131,3 +132,4 @@ dmypy.json
 .vscode/
 *.parquet
 lightning_logs/
+checkpoint/

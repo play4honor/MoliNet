@@ -1,0 +1,40 @@
+data: "./data/bigger_training_data.parquet"
+# data: "./data/test_data.parquet"
+
+training_params:
+  learning_rate: 0.0001
+  batch_size: 256
+  max_epochs: 7
+  num_workers: 0
+  log_every_n: 1
+  accumulate_grad_batches: 4
+  p_mask: 0.2
+  mask_tokens: True
+  holdout_prob: .1
+
+net_params:
+  d_model: 256
+  sequence_length: 128
+  n_layers: 4
+  n_head: 4
+  dim_ff: 256
+  dropout: 0.2
+
+features:
+  release_speed: {type: numeric}
+  pfx_x: {type: numeric}
+  pfx_z: {type: numeric}
+  n_batters_faced: {type: numeric}
+  stand: {type: categorical}
+  zone: {type: categorical}
+  pitcher: 
+    type: categorical
+    kwargs: {p_mask: 0.005}
+  batter: 
+    type: categorical
+    kwargs: {p_mask: 0.005}
+  pitch_type: {type: categorical}
+  description: {type: categorical}
+  events: {type: categorical}
+  inning_topbot: {type: categorical}
+  

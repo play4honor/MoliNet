@@ -2,7 +2,7 @@ import polars as pl
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, default_collate
 
 import yaml
 
@@ -10,13 +10,14 @@ import sys
 import itertools
 
 sys.path.insert(0, ".")
-from src.morphers import Normalizer, Integerizer
+from src.morphers import Normalizer, Integerizer, BigIntegerizer
 
 
 class PitchSequenceDataset(Dataset):
     MORPHER_MAP = {
         "numeric": Normalizer,
         "categorical": Integerizer,
+        "bigcat": BigIntegerizer,
     }
 
     def __init__(
@@ -24,6 +25,7 @@ class PitchSequenceDataset(Dataset):
         pitch_df,
         feature_config: dict,
         sequence_length: int = 64,
+        morpher_states: dict = None,
     ):
         self.sequence_length = sequence_length
 
@@ -43,10 +45,22 @@ class PitchSequenceDataset(Dataset):
             *[pl.col(ncol).cast(pl.Float32) for ncol in numeric_cols]
         )
 
-        self.morphers = {
-            feature: self.MORPHER_MAP[feature_type].from_data(pitch_df[feature])
-            for feature, feature_type in feature_config.items()
-        }
+        # If we have saved morpher states. They still need to match the config.
+        if morpher_states is not None:
+            print("Using saved morpher states.")
+            self.morphers = {
+                feature: self.MORPHER_MAP[feature_type].from_state_dict(
+                    morpher_states[feature]
+                )
+                for feature, feature_type in feature_config.items()
+            }
+        else:
+            self.morphers = {
+                feature: self.MORPHER_MAP[feature_spec["type"]].from_data(
+                    pitch_df[feature], **feature_spec.get("kwargs", dict())
+                )
+                for feature, feature_spec in feature_config.items()
+            }
 
         # Get the n_batters_faced feature
         pitches = pitch_df.select(
@@ -84,14 +98,26 @@ class PitchSequenceDataset(Dataset):
     def __getitem__(self, idx):
         pitch_subset = self.pitches.slice(idx, self.sequence_length)
 
-        return (
-            {
-                feature: torch.tensor(
-                    pitch_subset[feature], dtype=morpher.required_dtype
-                )
-                for feature, morpher in self.morphers.items()
-            },
-        ), torch.tensor(pitch_subset["is_sog"], dtype=torch.bool)
+        return {
+            feature: torch.tensor(pitch_subset[feature], dtype=morpher.required_dtype)
+            for feature, morpher in self.morphers.items()
+        }, torch.tensor(pitch_subset["is_sog"], dtype=torch.bool)
+
+
+class MaskCollator:
+    def __init__(self, mask_vals: dict[str, int], p: float = 0.01):
+        self.mask_vals = mask_vals
+        self.p = p
+
+    def __call__(self, batch):
+        batch, sog = default_collate(batch)
+        for column, mask_value in self.mask_vals.items():
+            unique_vals = batch[column].unique()
+            to_mask = unique_vals[torch.rand(unique_vals.shape) < self.p]
+            mask_pos = torch.isin(batch[column], to_mask)
+            batch[column][mask_pos] = mask_value
+
+        return batch, sog
 
 
 if __name__ == "__main__":
